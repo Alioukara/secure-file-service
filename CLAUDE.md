@@ -381,17 +381,23 @@ assumé et documenté.
 io.github.alioukara.sfs
 ├── api          controllers, DTO, GlobalExceptionHandler
 ├── domain       StoredFile, FileStatus, exceptions métier
-├── service      FileService, ScanService, ScanRecoveryJob (balayage)
-├── storage      FileStorage (interface) + LocalFileStorage
+├── service      FileService + FileServiceImpl
+│                ScanService + ScanServiceImpl
+│                ScanRecoveryJob (balayage)
+├── storage      FileStorage + LocalFileStorageImpl
 │                deux zones : quarantaine et zone servable
-├── antivirus    AntivirusScanner (interface)
-│                + ClamAvScanner (TCP INSTREAM) — actif par défaut
-│                + HttpScanner (API REST)
+├── antivirus    AntivirusScanner
+│                + ClamAvScannerImpl (TCP INSTREAM) — actif par défaut
+│                + HttpScannerImpl (API REST)
 └── config       configuration asynchrone, multipart, sémaphore de scan
 
 src/test
-└── antivirus    StubScanner — jamais sur le classpath d'exécution
+└── antivirus    StubScannerImpl — jamais sur le classpath d'exécution
 ```
+
+Toute implémentation d'interface est suffixée `Impl`. Quand plusieurs
+implémentations coexistent, le qualificatif qui les distingue précède le
+suffixe : `ClamAvScannerImpl`, `HttpScannerImpl`.
 
 ## Ce que tu ne fais pas
 
