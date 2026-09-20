@@ -1,0 +1,98 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-stored-file
+      author: alioukara
+      changes:
+        - createTable:
+            tableName: stored_file
+            columns:
+              # VARCHAR(36) rather than a native UUID type: H2 and MySQL do not
+              # share one, and this changelog must validate against both.
+              - column:
+                  name: id
+                  type: VARCHAR(36)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: original_filename
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: content_type
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: size_bytes
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              # SHA-256 in hexadecimal: 64 characters, never more.
+              - column:
+                  name: checksum
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: scan_attempts
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: lease_expiries
+                  type: INT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: scan_started_at
+                  type: DATETIME(6)
+              - column:
+                  name: lease_token
+                  type: VARCHAR(36)
+              - column:
+                  name: failure_reason
+                  type: VARCHAR(512)
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+
+        # Both quota accounts sum size_bytes by status, and the recovery sweep
+        # selects on status: this is the most frequent access path.
+        - createIndex:
+            tableName: stored_file
+            indexName: idx_stored_file_status
+            columns:
+              - column:
+                  name: status
+
+        # The sweep looks for expired leases: status first, then date.
+        - createIndex:
+            tableName: stored_file
+            indexName: idx_stored_file_status_scan_started_at
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: scan_started_at

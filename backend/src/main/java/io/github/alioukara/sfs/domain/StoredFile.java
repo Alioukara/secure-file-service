@@ -7,6 +7,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -18,8 +20,10 @@ public class StoredFile {
     public static final int MAX_SCAN_ATTEMPTS = 3;
     public static final int MAX_LEASE_EXPIRIES = 2;
 
+    /** Stored as text so one changelog validates on both H2 and MySQL. */
     @Id
-    @Column(nullable = false, updatable = false)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(nullable = false, length = 36, updatable = false)
     private UUID id;
 
     @Column(name = "original_filename", nullable = false, length = 255, updatable = false)
@@ -52,7 +56,8 @@ public class StoredFile {
      * superseded run must not be applied: the update is conditioned on this
      * value, which changes at every {@link #startScanning()}.
      */
-    @Column(name = "lease_token")
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "lease_token", length = 36)
     private UUID leaseToken;
 
     @Column(name = "failure_reason", length = 512)
@@ -72,9 +77,9 @@ public class StoredFile {
         // JPA
     }
 
-    private StoredFile(String originalFilename, String contentType, long sizeBytes, String checksum) {
+    private StoredFile(UUID id, String originalFilename, String contentType, long sizeBytes, String checksum) {
         Instant now = Instant.now();
-        this.id = UUID.randomUUID();
+        this.id = id;
         this.originalFilename = originalFilename;
         this.contentType = contentType;
         this.sizeBytes = sizeBytes;
@@ -85,11 +90,12 @@ public class StoredFile {
     }
 
     /**
-     * The id is generated here, not by the database: the file is streamed to
-     * quarantine under that name before the row is ever committed.
+     * The id comes from the caller: it names the file in quarantine, and the
+     * content must be written there before its checksum can be known.
      */
-    public static StoredFile pending(String originalFilename, String contentType, long sizeBytes, String checksum) {
-        return new StoredFile(originalFilename, contentType, sizeBytes, checksum);
+    public static StoredFile pending(UUID id, String originalFilename, String contentType,
+                                     long sizeBytes, String checksum) {
+        return new StoredFile(id, originalFilename, contentType, sizeBytes, checksum);
     }
 
     public void startScanning() {

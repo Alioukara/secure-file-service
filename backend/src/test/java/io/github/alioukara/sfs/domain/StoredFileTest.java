@@ -11,7 +11,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class StoredFileTest {
 
     private static StoredFile pending() {
-        return StoredFile.pending("report.pdf", "application/pdf", 1024L, "d41d8cd98f00b204e9800998ecf8427e");
+        return StoredFile.pending(UUID.randomUUID(), "report.pdf", "application/pdf", 1024L,
+                "d41d8cd98f00b204e9800998ecf8427e");
     }
 
     private static StoredFile scanning() {
@@ -31,8 +32,8 @@ class StoredFileTest {
         for (int i = 0; i < StoredFile.MAX_SCAN_ATTEMPTS; i++) {
             file.startScanning();
             file.markScanFailed("connection refused");
-            // Au dernier tour, markScanFailed part directement en
-            // SCAN_FAILED_EXHAUSTED : il n'y a plus rien a remettre en file.
+            // On the last pass markScanFailed goes straight to
+            // SCAN_FAILED_EXHAUSTED: there is nothing left to requeue.
             if (file.getStatus() == FileStatus.SCAN_FAILED) {
                 file.requeueAfterBackoff();
             }
@@ -68,6 +69,15 @@ class StoredFileTest {
         assertThat(file.getId()).isNotNull();
         assertThat(file.getScanStartedAt()).isNull();
         assertThat(file.getLeaseToken()).isNull();
+    }
+
+    @Test
+    void pending_devraitConserverLIdFourni_quandCree() {
+        UUID id = UUID.randomUUID();
+
+        StoredFile file = StoredFile.pending(id, "report.pdf", "application/pdf", 1L, "abc");
+
+        assertThat(file.getId()).isEqualTo(id);
     }
 
     @Test
