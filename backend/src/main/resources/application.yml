@@ -1,0 +1,72 @@
+spring:
+  application:
+    name: secure-file-service
+
+  profiles:
+    # Local default. Production overrides it with SPRING_PROFILES_ACTIVE.
+    active: dev
+
+  servlet:
+    multipart:
+      # Infrastructure ceiling. It protects the temporary directory and sizes
+      # both quarantine accounts. It must stay at least equal to the largest
+      # limit of the supported antivirus implementations.
+      #
+      # PROVISIONAL: 100MB comes from the default MaxFileSize of recent ClamAV,
+      # not from the pinned image. Confirm before freezing it:
+      #   docker run --rm clamav/clamav:1.5.4 clamconf \
+      #     | grep -iE 'MaxFileSize|MaxScanSize|StreamMaxLength|AlertExceedsMax'
+      max-file-size: 100MB
+      # Slightly above, to cover the multipart header overhead.
+      max-request-size: 105MB
+      # Always spill to disk, never to memory: nothing may sit whole on the heap.
+      file-size-threshold: 0
+
+  threads:
+    virtual:
+      # The limit of this system is not the thread but the antivirus. Threads
+      # are free, permits are not: the semaphore bounds throughput, not a pool.
+      enabled: true
+
+  jpa:
+    hibernate:
+      # The Liquibase changelog is the source of truth. Hibernate only checks
+      # that the entities match it, and refuses to start otherwise.
+      ddl-auto: validate
+    # Closes the session when the service returns. Left at true, an entity read
+    # from a view would trigger queries outside any transaction.
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+server:
+  tomcat:
+    # When an oversized upload is refused, Tomcat has to swallow the rest of the
+    # body to answer cleanly. Past this it cuts the connection and the client
+    # sees a reset instead of the 413. Trade-off: readable 413 on moderate
+    # overruns, cut on the huge ones.
+    max-swallow-size: 10MB
+
+sfs:
+  storage:
+    base-directory: ./storage-data
+    quota:
+      # AUTOMATIC account: PENDING + SCANNING + SCAN_FAILED. It drains on its
+      # own, so passing it is a load signal (503 + Retry-After).
+      # 100MB x 20 concurrent uploads in flight.
+      automatic: 2GB
+      # ON ACTION account: INFECTED + UNSCANNABLE + SCAN_FAILED_EXHAUSTED. It
+      # never drains on its own, so passing it requires operator action.
+      on-action: 5GB
+
+  antivirus:
+    # clamav or http, nothing else. The stub lives in src/test and is never on
+    # the runtime classpath: an environment variable must not be able to turn
+    # the antivirus off in silence.
+    implementation: clamav
+
+  api:
+    # Delay advertised to the client on the load 503. To adjust once the real
+    # scan duration has been measured.
+    retry-after-seconds: 30

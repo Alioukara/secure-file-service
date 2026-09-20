@@ -1,0 +1,8 @@
+# Tests. The embedded database comes from @DataJpaTest; only the schema policy
+# matters here: Liquibase creates it, Hibernate validates against it.
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml

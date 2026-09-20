@@ -1,0 +1,7 @@
+# Local development. Points at the MySQL 8 container dedicated to this project,
+# on port 3308 so it cannot collide with another database already running.
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3308/sfs?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: sfs
+    password: sfs
