@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.unit.DataSize;
@@ -19,6 +20,8 @@ import org.springframework.util.unit.DataSize;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,11 +61,14 @@ class FileServiceImplTest {
     @Mock
     private TransactionTemplate transactions;
 
+    @Mock
+    private ScanDispatcher dispatcher;
+
     private FileServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new FileServiceImpl(repository, storage, scanner, events, transactions,
+        service = new FileServiceImpl(repository, storage, scanner, events, transactions, dispatcher,
                 DataSize.ofBytes(AUTOMATIC_QUOTA), DataSize.ofBytes(ON_ACTION_QUOTA));
     }
 
@@ -105,7 +111,73 @@ class FileServiceImplTest {
                 new ByteArrayInputStream(CONTENT));
     }
 
+@Test
+    void requestRescan_devraitRelancerApresLeCommit_quandEtatEpuise() {
+        givenTransactionRunsInline();
+        givenSaveReturnsItsArgument();
+        StoredFile exhausted = exhausted();
+        when(repository.findById(exhausted.getId())).thenReturn(Optional.of(exhausted));
+
+        service.requestRescan(exhausted.getId());
+
+        assertThat(exhausted.getStatus()).isEqualTo(FileStatus.PENDING);
+        assertThat(exhausted.getScanAttempts()).isZero();
+        verify(dispatcher).submit(exhausted.getId());
+    }
+
     @Test
+    void requestRescan_devraitLever_quandEtatNonEligible() {
+        givenTransactionRunsInline();
+        StoredFile pending = StoredFile.pending(UUID.randomUUID(), "report.pdf", "application/pdf", 5L, "abc");
+        when(repository.findById(pending.getId())).thenReturn(Optional.of(pending));
+
+        assertThatThrownBy(() -> service.requestRescan(pending.getId()))
+                .isInstanceOf(RescanNotAllowedException.class);
+
+        verify(dispatcher, never()).submit(any());
+    }
+
+    @Test
+    void requestRescan_devraitLever_quandIdentifiantInconnu() {
+        givenTransactionRunsInline();
+        UUID unknown = UUID.randomUUID();
+        when(repository.findById(unknown)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.requestRescan(unknown))
+                .isInstanceOf(StoredFileNotFoundException.class);
+
+        verify(dispatcher, never()).submit(any());
+    }
+
+    @Test
+    void list_devraitToutRendre_quandAucunFiltre() {
+        service.list(null, Pageable.unpaged());
+
+        verify(repository).findAll(any(Pageable.class));
+        verify(repository, never()).findByStatusIn(any(), any());
+    }
+
+    @Test
+    void list_devraitFiltrer_quandStatutsFournis() {
+        service.list(List.of(FileStatus.PENDING), Pageable.unpaged());
+
+        verify(repository).findByStatusIn(eq(List.of(FileStatus.PENDING)), any(Pageable.class));
+        verify(repository, never()).findAll(any(Pageable.class));
+    }
+
+    private static StoredFile exhausted() {
+        StoredFile file = StoredFile.pending(UUID.randomUUID(), "report.pdf", "application/pdf", 5L, "abc");
+        for (int i = 0; i < StoredFile.MAX_SCAN_ATTEMPTS; i++) {
+            file.startScanning();
+            file.markScanFailed("connection refused");
+            if (file.getStatus() == FileStatus.SCAN_FAILED) {
+                file.requeueAfterBackoff();
+            }
+        }
+        return file;
+    }
+
+        @Test
     void upload_devraitPersisterEnPending_quandToutPasse() {
         givenEverythingPasses();
 

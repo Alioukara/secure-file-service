@@ -4,6 +4,7 @@ import io.github.alioukara.sfs.domain.FileStatus;
 import io.github.alioukara.sfs.domain.StoredFile;
 import io.github.alioukara.sfs.service.DownloadableFile;
 import io.github.alioukara.sfs.service.FileNotDownloadableException;
+import io.github.alioukara.sfs.service.RescanNotAllowedException;
 import io.github.alioukara.sfs.service.StoredFileNotFoundException;
 import io.github.alioukara.sfs.service.FileService;
 import io.github.alioukara.sfs.service.QuotaAccount;
@@ -13,12 +14,14 @@ import io.github.alioukara.sfs.storage.StorageException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
@@ -32,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -268,7 +272,94 @@ class FileControllerTest {
                 .andExpect(jsonPath("$.reason").value("STORAGE_FAILURE"));
     }
 
+@Test
+    void status_devraitExposerLaRaisonEtLesCompteurs_quandFichierConnu() throws Exception {
+        StoredFile file = pendingFile();
+        file.startScanning();
+        file.markUnscannable("encrypted archive");
+        when(fileService.status(file.getId())).thenReturn(file);
+
+        mvc.perform(get("/api/files/{id}/status", file.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNSCANNABLE"))
+                .andExpect(jsonPath("$.reason").value("encrypted archive"))
+                .andExpect(jsonPath("$.scanAttempts").value(0))
+                .andExpect(jsonPath("$.leaseExpiries").value(0))
+                .andExpect(jsonPath("$.checksum").doesNotExist());
+    }
+
     @Test
+    void status_devraitRendre404_quandIdentifiantInconnu() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(fileService.status(id)).thenThrow(new StoredFileNotFoundException(id));
+
+        mvc.perform(get("/api/files/{id}/status", id))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.reason").value("FILE_NOT_FOUND"));
+    }
+
+    @Test
+    void rescan_devraitRendre202_quandEtatEpuise() throws Exception {
+        StoredFile requeued = pendingFile();
+        when(fileService.requestRescan(any(UUID.class))).thenReturn(requeued);
+
+        mvc.perform(post("/api/files/{id}/rescan", UUID.randomUUID()))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("PENDING"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = FileStatus.class, names = {
+            "PENDING", "SCANNING", "SCAN_FAILED", "CLEAN", "INFECTED", "UNSCANNABLE"})
+    void rescan_devraitRendre409_quandEtatNonEligible(FileStatus status) throws Exception {
+        when(fileService.requestRescan(any(UUID.class)))
+                .thenThrow(new RescanNotAllowedException(status));
+
+        mvc.perform(post("/api/files/{id}/rescan", UUID.randomUUID()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.reason").value("RESCAN_NOT_ALLOWED"))
+                // Says why, not just no.
+                .andExpect(jsonPath("$.detail").value(containsString(status.name())));
+    }
+
+    @Test
+    void rescan_devraitRendre404_quandIdentifiantInconnu() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(fileService.requestRescan(id)).thenThrow(new StoredFileNotFoundException(id));
+
+        mvc.perform(post("/api/files/{id}/rescan", id))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void list_devraitNExposerAucuneEntite_quandFichiersRetournes() throws Exception {
+        StoredFile file = pendingFile();
+        when(fileService.list(any(), any())).thenReturn(new PageImpl<>(List.of(file)));
+
+        mvc.perform(get("/api/files"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].fileId").value(file.getId().toString()))
+                .andExpect(jsonPath("$.content[0].originalFilename").value("report.pdf"))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                // Ni le checksum, ni le jeton de bail, ni la version JPA.
+                .andExpect(jsonPath("$.content[0].checksum").doesNotExist())
+                .andExpect(jsonPath("$.content[0].leaseToken").doesNotExist())
+                .andExpect(jsonPath("$.content[0].version").doesNotExist())
+                // Ni les champs internes de Page.
+                .andExpect(jsonPath("$.pageable").doesNotExist());
+    }
+
+    @Test
+    void list_devraitTransmettreLeFiltre_quandStatutsDemandes() throws Exception {
+        when(fileService.list(any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        mvc.perform(get("/api/files").param("status", "PENDING", "SCANNING"))
+                .andExpect(status().isOk());
+
+        verify(fileService).list(eq(List.of(FileStatus.PENDING, FileStatus.SCANNING)), any());
+    }
+
+        @Test
     void handler_devraitRendre413_quandConteneurRefuseLUpload() throws Exception {
         mvc.perform(post("/test/container-limit"))
                 .andExpect(status().isPayloadTooLarge())

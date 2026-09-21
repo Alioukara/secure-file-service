@@ -1,6 +1,7 @@
 package io.github.alioukara.sfs.service;
 
 import io.github.alioukara.sfs.antivirus.AntivirusScanner;
+import io.github.alioukara.sfs.domain.FileStatus;
 import io.github.alioukara.sfs.domain.StoredFile;
 import io.github.alioukara.sfs.repository.StoredFileRepository;
 import io.github.alioukara.sfs.storage.FileStorage;
@@ -9,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.unit.DataSize;
@@ -17,6 +20,7 @@ import java.io.InputStream;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collection;
 import java.util.HexFormat;
 import java.util.UUID;
 
@@ -32,6 +36,7 @@ public class FileServiceImpl implements FileService {
     private final AntivirusScanner scanner;
     private final ApplicationEventPublisher events;
     private final TransactionTemplate transactions;
+    private final ScanDispatcher dispatcher;
     private final long automaticQuotaBytes;
     private final long onActionQuotaBytes;
 
@@ -40,6 +45,7 @@ public class FileServiceImpl implements FileService {
                            AntivirusScanner scanner,
                            ApplicationEventPublisher events,
                            TransactionTemplate transactions,
+                           ScanDispatcher dispatcher,
                            @Value("${sfs.storage.quota.automatic}") DataSize automaticQuota,
                            @Value("${sfs.storage.quota.on-action}") DataSize onActionQuota) {
         this.repository = repository;
@@ -47,6 +53,7 @@ public class FileServiceImpl implements FileService {
         this.scanner = scanner;
         this.events = events;
         this.transactions = transactions;
+        this.dispatcher = dispatcher;
         this.automaticQuotaBytes = automaticQuota.toBytes();
         this.onActionQuotaBytes = onActionQuota.toBytes();
     }
@@ -80,6 +87,45 @@ public class FileServiceImpl implements FileService {
                 file.getContentType(),
                 file.getSizeBytes(),
                 storage.retrieve(StorageZone.SERVABLE, fileId));
+    }
+
+    @Override
+    public StoredFile status(UUID fileId) {
+        return repository.findById(fileId)
+                .orElseThrow(() -> new StoredFileNotFoundException(fileId));
+    }
+
+    /**
+     * The relaunch happens AFTER the commit, never inside it: called from within,
+     * the async thread would read the row still in SCAN_FAILED_EXHAUSTED and skip
+     * it in silence. This is the same guarantee AFTER_COMMIT gives on upload.
+     *
+     * <p>Not a shortcut either — the sweep already dispatches through the very
+     * same component. A request triggers it here instead of a timer, and the
+     * sweep stays the guarantee.
+     */
+    @Override
+    public StoredFile requestRescan(UUID fileId) {
+        StoredFile requeued = transactions.execute(status -> {
+            StoredFile file = repository.findById(fileId)
+                    .orElseThrow(() -> new StoredFileNotFoundException(fileId));
+
+            if (file.getStatus() != FileStatus.SCAN_FAILED_EXHAUSTED) {
+                throw new RescanNotAllowedException(file.getStatus());
+            }
+            file.requestRescan();
+            return repository.save(file);
+        });
+
+        dispatcher.submit(fileId);
+        return requeued;
+    }
+
+    @Override
+    public Page<StoredFile> list(Collection<FileStatus> statuses, Pageable pageable) {
+        return statuses == null || statuses.isEmpty()
+                ? repository.findAll(pageable)
+                : repository.findByStatusIn(statuses, pageable);
     }
 
     /**

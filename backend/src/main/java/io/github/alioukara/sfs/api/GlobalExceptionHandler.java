@@ -2,6 +2,7 @@ package io.github.alioukara.sfs.api;
 
 import io.github.alioukara.sfs.service.FileNotDownloadableException;
 import io.github.alioukara.sfs.service.QuotaAccount;
+import io.github.alioukara.sfs.service.RescanNotAllowedException;
 import io.github.alioukara.sfs.service.QuotaExceededException;
 import io.github.alioukara.sfs.service.ScannerCapacityExceededException;
 import io.github.alioukara.sfs.service.StoredFileNotFoundException;
@@ -111,6 +112,12 @@ public class GlobalExceptionHandler {
 
     private static ResponseEntity<ProblemDetail> definitive(HttpStatus status, String detail, String reason) {
         return ResponseEntity.status(status).body(problem(status, detail, reason));
+    }
+
+    /** Says why, not just no: the current status is what the client needs. */
+    @ExceptionHandler(RescanNotAllowedException.class)
+    public ProblemDetail onRescanRefused(RescanNotAllowedException e) {
+        return problem(HttpStatus.CONFLICT, e.getMessage(), "RESCAN_NOT_ALLOWED");
     }
 
     @ExceptionHandler(StorageException.class)

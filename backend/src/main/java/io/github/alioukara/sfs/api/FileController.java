@@ -1,8 +1,12 @@
 package io.github.alioukara.sfs.api;
 
+import io.github.alioukara.sfs.domain.FileStatus;
 import io.github.alioukara.sfs.domain.StoredFile;
 import io.github.alioukara.sfs.service.DownloadableFile;
 import io.github.alioukara.sfs.service.FileService;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -20,6 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -65,6 +70,31 @@ public class FileController {
                 .contentType(MediaType.parseMediaType(file.contentType()))
                 .contentLength(file.sizeBytes())
                 .body(body);
+    }
+
+    @GetMapping("/{id}/status")
+    public FileStatusResponse status(@PathVariable UUID id) {
+        return FileStatusResponse.from(fileService.status(id));
+    }
+
+    @PostMapping("/{id}/rescan")
+    public ResponseEntity<UploadResponse> rescan(@PathVariable UUID id) {
+        StoredFile requeued = fileService.requestRescan(id);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(UploadResponse.from(requeued));
+    }
+
+    /**
+     * Nothing is hidden here. Masking INFECTED would contradict /status, which
+     * already reveals it for a known id, and would keep an operator from seeing
+     * what fills the retention account.
+     */
+    @GetMapping
+    public PageResponse<FileSummary> list(
+            @RequestParam(name = "status", required = false) List<FileStatus> statuses,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
+            Pageable pageable) {
+
+        return PageResponse.of(fileService.list(statuses, pageable), FileSummary::from);
     }
 
     private static String requireFilename(MultipartFile part) {
