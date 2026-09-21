@@ -95,6 +95,9 @@ sfs:
     sweep-batch-size: 50
 
   api:
+    # Never "*": this service exists to be careful about what it lets through,
+    # and a wildcard here would be the wrong signal as much as the wrong setting.
+    allowed-origins: ${SFS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
     # Delay advertised to the client on the load 503. To adjust once the real
     # scan duration has been measured.
     retry-after-seconds: 30
