@@ -80,6 +80,22 @@ sfs:
       # Under the 10 threads of the daemon, to leave it room to breathe.
       max-concurrent-scans: 8
 
+    http:
+      base-url: ${SFS_HTTP_SCANNER_URL}
+      scan-path: ${SFS_HTTP_SCANNER_SCAN_PATH:/v2/scan}
+      # Empty means the API needs no credential, which is the case of the
+      # clamav-rest image. The header name is configurable rather than fixed:
+      # it covers "X-API-Key: abc" and "Authorization: Bearer abc" alike.
+      api-key: ${SFS_HTTP_SCANNER_API_KEY:}
+      api-key-header: ${SFS_HTTP_SCANNER_API_KEY_HEADER:X-API-Key}
+      connect-timeout-millis: 5000
+      read-timeout-millis: 300000
+      # No default on purpose. Both depend on the API this points at, and a
+      # guessed value would either refuse sound files or return CLEAN on content
+      # the remote end truncated. Absent, the application refuses to start.
+      max-scannable-size-bytes: ${SFS_HTTP_SCANNER_MAX_SIZE_BYTES}
+      max-concurrent-scans: ${SFS_HTTP_SCANNER_MAX_CONCURRENT_SCANS}
+
   scan:
     # How often the sweep runs. The event already covers the normal path, so
     # this only has to be short enough that an incident is not felt for long.

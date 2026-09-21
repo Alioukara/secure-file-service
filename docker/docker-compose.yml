@@ -56,6 +56,13 @@ services:
         condition: service_healthy
       clamav:
         condition: service_healthy
+      # required: false, so the default profile, where this service does not
+      # exist, still starts. Waiting matters: scanAttempts is capped at 3, and a
+      # scanner absent during the first minutes would exhaust them on files that
+      # have nothing wrong with them.
+      clamav-rest:
+        condition: service_healthy
+        required: false
     environment:
       # The dev profile points at localhost:3308, which means nothing inside a
       # container. Overridden here rather than adding a third Spring profile.
@@ -64,6 +71,16 @@ services:
       SPRING_DATASOURCE_PASSWORD: sfs
       SFS_CLAMAV_HOST: clamav
       SFS_CLAMAV_PORT: 3310
+      # Switch with: SFS_ANTIVIRUS_IMPLEMENTATION=http docker compose --profile http up
+      SFS_ANTIVIRUS_IMPLEMENTATION: ${SFS_ANTIVIRUS_IMPLEMENTATION:-clamav}
+      SFS_HTTP_SCANNER_URL: http://clamav-rest:9000
+      # Read from the image with clamconf, not assumed:
+      #   MaxFileSize 100MB, StreamMaxLength 100MB, MaxThreads 10
+      # AlertExceedsMax is DISABLED there and the image ignores its own
+      # clamd.conf, so past 100MB clamd answers OK without having analysed.
+      # The byte count in HttpScannerImpl is the only guard against that.
+      SFS_HTTP_SCANNER_MAX_SIZE_BYTES: "104857600"
+      SFS_HTTP_SCANNER_MAX_CONCURRENT_SCANS: "8"
       # Absolute path: ./storage-data is relative to a working directory that
       # does not exist in the image.
       SFS_STORAGE_BASE_DIRECTORY: /var/lib/sfs
@@ -98,7 +115,9 @@ services:
     ports:
       - "9000:9000"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:9000/"]
+      # The image ships neither curl nor wget, only busybox. Its own endpoint is
+      # what answers, and it reports clamd's state, so this proves both layers.
+      test: ["CMD", "busybox", "wget", "-q", "-O", "-", "http://localhost:9000/"]
       interval: 10s
       timeout: 10s
       retries: 30
