@@ -1,4 +1,5 @@
 # docker compose up                  -> the whole system, one command
+#                                       front on 3000, API on 8080
 # docker compose up -d mysql clamav  -> dependencies only, backend run from the IDE
 #
 # Every value has a hard coded default on purpose: .env is git ignored, so a
@@ -66,12 +67,27 @@ services:
       # Absolute path: ./storage-data is relative to a working directory that
       # does not exist in the image.
       SFS_STORAGE_BASE_DIRECTORY: /var/lib/sfs
+      # The origin the browser loads the front from. Never "*".
+      SFS_ALLOWED_ORIGINS: http://localhost:3000
     ports:
       - "8080:8080"
     volumes:
       # ONE volume for both zones. They must share a file store or the atomic
       # move is not atomic, and the service refuses to start — which is wanted.
       - storage-data:/var/lib/sfs
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # Inlined at build time by Vite: the browser calls the backend directly,
+        # and the backend allows this origin through its CORS configuration.
+        VITE_API_BASE_URL: http://localhost:8080
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
 
   # Demonstrates the HTTP implementation. This image ships its own ClamAV, so it
   # replaces the clamav service rather than joining it:
