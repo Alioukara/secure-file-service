@@ -4,6 +4,7 @@ import io.github.alioukara.sfs.antivirus.AntivirusScanner;
 import io.github.alioukara.sfs.domain.StoredFile;
 import io.github.alioukara.sfs.repository.StoredFileRepository;
 import io.github.alioukara.sfs.storage.FileStorage;
+import io.github.alioukara.sfs.storage.StorageZone;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -63,6 +64,22 @@ public class FileServiceImpl implements FileService {
 
         StoredFile file = StoredFile.pending(key, originalFilename, contentType, written, checksum);
         return persistAndAnnounce(file);
+    }
+
+    @Override
+    public DownloadableFile download(UUID fileId) {
+        StoredFile file = repository.findById(fileId)
+                .orElseThrow(() -> new StoredFileNotFoundException(fileId));
+
+        if (!file.isDownloadable()) {
+            throw new FileNotDownloadableException(file.getStatus());
+        }
+
+        return new DownloadableFile(
+                file.getOriginalFilename(),
+                file.getContentType(),
+                file.getSizeBytes(),
+                storage.retrieve(StorageZone.SERVABLE, fileId));
     }
 
     /**

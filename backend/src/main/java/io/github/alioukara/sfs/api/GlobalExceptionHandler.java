@@ -1,8 +1,10 @@
 package io.github.alioukara.sfs.api;
 
+import io.github.alioukara.sfs.service.FileNotDownloadableException;
 import io.github.alioukara.sfs.service.QuotaAccount;
 import io.github.alioukara.sfs.service.QuotaExceededException;
 import io.github.alioukara.sfs.service.ScannerCapacityExceededException;
+import io.github.alioukara.sfs.service.StoredFileNotFoundException;
 import io.github.alioukara.sfs.storage.StorageException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +71,46 @@ public class GlobalExceptionHandler {
             response.header(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
         }
         return response.body(body);
+    }
+
+    @ExceptionHandler(StoredFileNotFoundException.class)
+    public ProblemDetail onUnknownFile(StoredFileNotFoundException e) {
+        return problem(HttpStatus.NOT_FOUND, e.getMessage(), "FILE_NOT_FOUND");
+    }
+
+    /**
+     * Only decides how to say no; the service has already decided that we do.
+     * The switch is exhaustive and has no {@code default}: an eighth status must
+     * break the compilation rather than fall into a branch that serves it.
+     */
+    @ExceptionHandler(FileNotDownloadableException.class)
+    public ResponseEntity<ProblemDetail> onNotDownloadable(FileNotDownloadableException e) {
+        return switch (e.getStatus()) {
+            case PENDING, SCANNING, SCAN_FAILED -> retryLater(
+                    "The file is still being processed", "SCAN_IN_PROGRESS");
+
+            case SCAN_FAILED_EXHAUSTED -> definitive(HttpStatus.CONFLICT,
+                    "The scan could not complete, a rescan must be requested", "SCAN_GAVE_UP");
+
+            case UNSCANNABLE -> definitive(HttpStatus.CONFLICT,
+                    "The file cannot be analysed and will never be served", "FILE_UNSCANNABLE");
+
+            case INFECTED -> definitive(HttpStatus.FORBIDDEN,
+                    "The file was found infected", "FILE_INFECTED");
+
+            case CLEAN -> throw new IllegalStateException(
+                    "CLEAN is downloadable and cannot reach this handler");
+        };
+    }
+
+    private ResponseEntity<ProblemDetail> retryLater(String detail, String reason) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds))
+                .body(problem(HttpStatus.CONFLICT, detail, reason));
+    }
+
+    private static ResponseEntity<ProblemDetail> definitive(HttpStatus status, String detail, String reason) {
+        return ResponseEntity.status(status).body(problem(status, detail, reason));
     }
 
     @ExceptionHandler(StorageException.class)
