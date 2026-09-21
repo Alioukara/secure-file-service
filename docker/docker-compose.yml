@@ -1,0 +1,94 @@
+# docker compose up                  -> the whole system, one command
+# docker compose up -d mysql clamav  -> dependencies only, backend run from the IDE
+#
+# Every value has a hard coded default on purpose: .env is git ignored, so a
+# compose relying on absent variables would break for anyone cloning the repo.
+#
+# First start of ClamAV takes SEVERAL MINUTES: it loads its signature database
+# into memory. The backend waits for it, so nothing appears to happen until then.
+
+name: secure-file-service
+
+services:
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: sfs
+      MYSQL_USER: sfs
+      MYSQL_PASSWORD: sfs
+    ports:
+      # 3308 outside, to leave 3306 and 3307 to whatever already runs here.
+      - "3308:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "sfs", "-psfs"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  clamav:
+    image: clamav/clamav:1.5.4
+    volumes:
+      - ./clamd.conf:/etc/clamav/clamd.conf:ro
+      - clamav-data:/var/lib/clamav
+    ports:
+      - "3310:3310"
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      # Loading the signature database is slow. Too short a window here and the
+      # container is declared unhealthy while it was merely starting.
+      start_period: 300s
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    depends_on:
+      mysql:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    environment:
+      # The dev profile points at localhost:3308, which means nothing inside a
+      # container. Overridden here rather than adding a third Spring profile.
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/sfs?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: sfs
+      SPRING_DATASOURCE_PASSWORD: sfs
+      SFS_CLAMAV_HOST: clamav
+      SFS_CLAMAV_PORT: 3310
+      # Absolute path: ./storage-data is relative to a working directory that
+      # does not exist in the image.
+      SFS_STORAGE_BASE_DIRECTORY: /var/lib/sfs
+    ports:
+      - "8080:8080"
+    volumes:
+      # ONE volume for both zones. They must share a file store or the atomic
+      # move is not atomic, and the service refuses to start — which is wanted.
+      - storage-data:/var/lib/sfs
+
+  # Demonstrates the HTTP implementation. This image ships its own ClamAV, so it
+  # replaces the clamav service rather than joining it:
+  #   docker compose --profile http up -d clamav-rest
+  clamav-rest:
+    image: ajilaag/clamav-rest:0.6.6
+    profiles: ["http"]
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:9000/"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+
+volumes:
+  mysql-data:
+  clamav-data:
+  storage-data:
