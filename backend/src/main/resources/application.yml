@@ -80,6 +80,20 @@ sfs:
       # Under the 10 threads of the daemon, to leave it room to breathe.
       max-concurrent-scans: 8
 
+  scan:
+    # How often the sweep runs. The event already covers the normal path, so
+    # this only has to be short enough that an incident is not felt for long.
+    sweep-interval-millis: 15000
+    # A scan holding its lease longer than this is presumed dead and reclaimed.
+    # Must stay above the longest expected scan, or a slow one gets restarted
+    # while it is still running.
+    lease-timeout: 10m
+    # A scanner that just failed is given time to come back before we retry.
+    retry-backoff: 1m
+    # Rows locked per sweep and per case. Bounded so one tick cannot hold a long
+    # transaction over the whole table.
+    sweep-batch-size: 50
+
   api:
     # Delay advertised to the client on the load 503. To adjust once the real
     # scan duration has been measured.

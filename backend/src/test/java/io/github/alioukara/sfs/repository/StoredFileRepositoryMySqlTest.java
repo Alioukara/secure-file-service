@@ -10,6 +10,8 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.EnumSet;
 import java.util.UUID;
 
@@ -67,6 +69,47 @@ class StoredFileRepositoryMySqlTest {
         persisted(250);
 
         assertThat(repository.sumSizeByStatusIn(EnumSet.of(FileStatus.PENDING))).isEqualTo(350);
+    }
+
+    @Test
+    void lockQueued_devraitRendreLesPending_quandBalayageCherche() {
+        StoredFile queued = persisted(100);
+        entityManager.flush();
+
+        assertThat(repository.lockQueued(50)).contains(queued.getId());
+    }
+
+    @Test
+    void lockExpiredLeases_devraitIgnorerLesBauxFrais_quandSeuilRecent() {
+        StoredFile scanning = persisted(100);
+        scanning.startScanning();
+        repository.saveAndFlush(scanning);
+
+        assertThat(repository.lockExpiredLeases(Instant.now().minus(Duration.ofMinutes(10)), 50))
+                .doesNotContain(scanning.getId());
+        assertThat(repository.lockExpiredLeases(Instant.now().plusSeconds(60), 50))
+                .contains(scanning.getId());
+    }
+
+    @Test
+    void lockRetryable_devraitRendreLesScanFailed_quandBackoffEcoule() {
+        StoredFile failed = persisted(100);
+        failed.startScanning();
+        failed.markScanFailed("connection refused");
+        repository.saveAndFlush(failed);
+
+        assertThat(repository.lockRetryable(Instant.now().plusSeconds(60), 50))
+                .contains(failed.getId());
+    }
+
+    @Test
+    void lockQueued_devraitBornerLeLot_quandPlusDeLignesQueDemande() {
+        persisted(100);
+        persisted(100);
+        persisted(100);
+        entityManager.flush();
+
+        assertThat(repository.lockQueued(2)).hasSize(2);
     }
 
     @Test
