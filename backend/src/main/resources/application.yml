@@ -50,7 +50,7 @@ server:
 
 sfs:
   storage:
-    base-directory: ./storage-data
+    base-directory: ${SFS_STORAGE_BASE_DIRECTORY:./storage-data}
     quota:
       # AUTOMATIC account: PENDING + SCANNING + SCAN_FAILED. It drains on its
       # own, so passing it is a load signal (503 + Retry-After).
@@ -65,6 +65,20 @@ sfs:
     # the runtime classpath: an environment variable must not be able to turn
     # the antivirus off in silence.
     implementation: clamav
+
+    clamav:
+      host: ${SFS_CLAMAV_HOST:localhost}
+      port: ${SFS_CLAMAV_PORT:3310}
+      connect-timeout-millis: 5000
+      # A 100MB file on a loaded daemon takes far longer than a socket would
+      # normally wait. Too short a value turns a slow scan into a false outage.
+      read-timeout-millis: 300000
+      # Read from clamav/clamav:1.5.4 with clamconf, not assumed:
+      #   MaxFileSize 100MB, StreamMaxLength 100MB, MaxThreads 10
+      # The declared limit is MaxFileSize: past it clamd stops analysing.
+      max-scannable-size-bytes: 104857600
+      # Under the 10 threads of the daemon, to leave it room to breathe.
+      max-concurrent-scans: 8
 
   api:
     # Delay advertised to the client on the load 503. To adjust once the real
