@@ -272,9 +272,20 @@ prétendre qu'il garantit l'intégrité : il est calculé et conservé, c'est to
      actif, exposée par `AntivirusScanner`.
 
 - **Implémentation active par défaut : `clamav`.** `sfs.antivirus.implementation`
-  vaut `clamav` ou `http`, rien d'autre. Le stub vit dans `src/test` et n'est
+  vaut `clamav` ou `http`, rien d'autre, et toute autre valeur fait échouer le
+  démarrage sur un message qui la nomme. Le stub vit dans `src/test` et n'est
   câblé que par le contexte de test : une variable d'environnement ne doit pas
   pouvoir désactiver l'antivirus en silence.
+
+- **Les limites du `HttpScanner` sont obligatoires, sans valeur par défaut.**
+  Taille maximale analysable et scans concurrents dépendent de l'API visée.
+  Une valeur devinée refuserait des fichiers sains, ou rendrait `CLEAN` sur du
+  contenu que l'API distante a tronqué. Absentes, l'application ne démarre pas.
+
+- **`GET /api/files` montre tous les états**, avec un filtre `?status=`. Masquer
+  les `INFECTED` serait incohérent avec `/status`, qui les révèle déjà pour un
+  identifiant connu, et priverait l'opérateur de ce qui sature son compte de
+  conservation.
 
 - **Virtual threads**, `spring.threads.virtual.enabled=true`, sans
   `ThreadPoolTaskExecutor`. La limite n'est pas le thread, c'est l'antivirus.
@@ -289,29 +300,24 @@ prétendre qu'il garantit l'intégrité : il est calculé et conservé, c'est to
   | capacité déclarée par `ClamAvScanner` | 100 Mo | le `MaxFileSize` de l'image épinglée |
   | `spring.servlet.multipart.max-file-size` | 100 Mo | au moins la plus grande limite des implémentations |
   | `max-request-size` | 105 Mo | overhead multipart |
-  | permis déclarés par `ClamAvScanner` | 8 | `MaxThreads` vaut 12, on garde de la marge |
+  | permis déclarés par `ClamAvScanner` | 8 | `MaxThreads` vaut 10, on garde de la marge |
   | quota du compte automatique | 2 Go | 100 Mo × 20 uploads simultanés en vol |
   | quota du compte sur action | 5 Go | conservation des INFECTED et UNSCANNABLE |
   | `server.tomcat.max-swallow-size` | 10 Mo | arbitrage entre 413 propre et connection reset |
 
-  **Réserve** : les 100 Mo et les 8 permis viennent des défauts de ClamAV
-  récent, pas de l'image épinglée. Les lire avant de figer :
+  Ces valeurs sont lues sur l'image épinglée, pas supposées :
   `docker run --rm clamav/clamav:1.5.4 clamconf | grep -iE 'MaxFileSize|MaxScanSize|StreamMaxLength|AlertExceedsMax'`
 
-  `AlertExceedsMax TRUE` est obligatoire dans `clamd.conf`.
+  `AlertExceedsMax TRUE` est obligatoire dans `clamd.conf`. Une implémentation
+  qui ne peut pas l'activer, parce que l'image distante ignore sa configuration,
+  doit compter les octets elle-même.
 
 ### Reste à trancher
 
-- **Les limites du `HttpScanner`** — taille maximale analysable et scans
-  concurrents. Elles dépendent de l'API visée et n'ont pas de défaut
-  raisonnable.
-- **`GET /api/files`** — la liste paginée montre-t-elle les `INFECTED` ?
 - **Le sort de la contrainte n°8.** Elle justifie le `ReentrantLock` par la
   sérialisation de l'accès au socket ClamAV. Or avec 8 permis il y a 8
   connexions INSTREAM distinctes, donc rien à sérialiser. Le piège
   `synchronized` / thread virtuel reste vrai ; sa justification est à réécrire.
-- **Le livrable** : périmètre du front, stratégie de test, contenu du README,
-  services du docker-compose.
 
 ### Se tranchent en écrivant le code, pas ici
 
