@@ -73,14 +73,20 @@ services:
       SFS_CLAMAV_PORT: 3310
       # Switch with: SFS_ANTIVIRUS_IMPLEMENTATION=http docker compose --profile http up
       SFS_ANTIVIRUS_IMPLEMENTATION: ${SFS_ANTIVIRUS_IMPLEMENTATION:-clamav}
-      SFS_HTTP_SCANNER_URL: http://clamav-rest:9000
+      # Defaults target the demo container. Override any of them to point at a
+      # real scanning API instead.
+      SFS_HTTP_SCANNER_URL: ${SFS_HTTP_SCANNER_URL:-http://clamav-rest:9000}
+      SFS_HTTP_SCANNER_SCAN_PATH: ${SFS_HTTP_SCANNER_SCAN_PATH:-/v2/scan}
+      # Empty means the API needs no credential, which is the case here.
+      SFS_HTTP_SCANNER_API_KEY: ${SFS_HTTP_SCANNER_API_KEY:-}
+      SFS_HTTP_SCANNER_API_KEY_HEADER: ${SFS_HTTP_SCANNER_API_KEY_HEADER:-X-API-Key}
       # Read from the image with clamconf, not assumed:
       #   MaxFileSize 100MB, StreamMaxLength 100MB, MaxThreads 10
       # AlertExceedsMax is DISABLED there and the image ignores its own
       # clamd.conf, so past 100MB clamd answers OK without having analysed.
       # The byte count in HttpScannerImpl is the only guard against that.
-      SFS_HTTP_SCANNER_MAX_SIZE_BYTES: "104857600"
-      SFS_HTTP_SCANNER_MAX_CONCURRENT_SCANS: "8"
+      SFS_HTTP_SCANNER_MAX_SIZE_BYTES: ${SFS_HTTP_SCANNER_MAX_SIZE_BYTES:-104857600}
+      SFS_HTTP_SCANNER_MAX_CONCURRENT_SCANS: ${SFS_HTTP_SCANNER_MAX_CONCURRENT_SCANS:-8}
       # Absolute path: ./storage-data is relative to a working directory that
       # does not exist in the image.
       SFS_STORAGE_BASE_DIRECTORY: /var/lib/sfs
